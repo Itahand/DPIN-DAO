@@ -13,30 +13,35 @@ import (
 func main() {
 	o := Overflow(
 		WithGlobalPrintOptions(),
-		// WithNetwork("testnet"),
+		WithNetwork("testnet"),
 	)
 
 	fmt.Println("Testing Contract")
 
-	color.Blue("Mneme Contract testing")
+	color.Blue("DAO-Pin Contract testing")
 
-	color.Green("Setup bob account for ArtDrop collection")
+	color.Green("Setup bob account for DAO-Pin collection")
 	// Vote on the founders topic
-	o.Tx("DAO/founder_vote",
-		WithSigner("account"),
-		WithArg("firstOption", "bob"),
-		WithArg("secondOption", "alice"),
-		WithArg("thirdOption", "account"),
-	).Print()
-	// Fetch the votes for the founders topic
-	o.Script("get_founder_votes").Print()
+	/* 	o.Tx("DAO/founder_vote",
+	   		WithSigner("dpin-dao"),
+	   		WithArg("firstOption", "dao-bob"),
+	   		WithArg("secondOption", "dao-alice"),
+	   		WithArg("thirdOption", "dao-tito"),
+	   	).Print()
+	   	// Fetch the votes for the founders topic
+	   	o.Script("get_founder_votes").Print() */
 	// Bob votes
-	o.Tx("DAO/founder_vote",
-		WithSigner("bob"),
-		WithArg("firstOption", "account"),
-		WithArg("secondOption", "alice"),
-		WithArg("thirdOption", "tito"),
-	).Print()
+	/* 	o.Tx("DAO/founder_vote",
+		WithSigner("dao-bob"),
+		WithArg("firstOption", "dao-bob"),
+		WithArg("secondOption", "dao-alice"),
+		WithArg("thirdOption", "dao-tito"),
+	).Print() */
 	o.Script("get_founder_votes").Print()
+	o.Script("get_founders").Print()
+	// close the founders topic
+	o.Tx("DAO/close_founder_topic",
+		WithSigner("dao-bob"),
+	).Print()
 
 }

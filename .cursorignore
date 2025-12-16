@@ -4,3 +4,7 @@ emulator-account.pkey
 
 # Pay attention to imports directory
 !imports
+dpin-dao.pkey
+dao-bob.pkey
+dao-alice.pkey
+dao-tito.pkey

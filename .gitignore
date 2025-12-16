@@ -2,3 +2,7 @@
 emulator-account.pkey
 imports
 .env
+dpin-dao.pkey
+dao-bob.pkey
+dao-alice.pkey
+dao-tito.pkey

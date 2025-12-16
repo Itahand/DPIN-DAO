@@ -180,6 +180,34 @@
 		"emulator-tito": {
 			"address": "e03daebed8ca0615",
 			"key": "7082dc9dd0cb9abd662313db68654658779949761abb30be8276009ccdc8af18"
+		},
+		"testnet-dao-alice": {
+			"address": "c88c2d30004f0c85",
+			"key": {
+				"type": "file",
+				"location": "dao-alice.pkey"
+			}
+		},
+		"testnet-dao-bob": {
+			"address": "ded84803994b06e4",
+			"key": {
+				"type": "file",
+				"location": "dao-bob.pkey"
+			}
+		},
+		"testnet-dao-tito": {
+			"address": "2ceb94ed11b50c5a",
+			"key": {
+				"type": "file",
+				"location": "dao-tito.pkey"
+			}
+		},
+		"testnet-dpin-dao": {
+			"address": "3abff1de88b1063b",
+			"key": {
+				"type": "file",
+				"location": "dpin-dao.pkey"
+			}
 		}
 	},
 	"deployments": {
@@ -189,6 +217,14 @@
 			],
 			"emulator-alice": [],
 			"emulator-bob": []
+		},
+		"testnet": {
+			"testnet-dao-alice": [],
+			"testnet-dao-bob": [],
+			"testnet-dao-tito": [],
+			"testnet-dpin-dao": [
+				"DAO"
+			]
 		}
 	}
 }

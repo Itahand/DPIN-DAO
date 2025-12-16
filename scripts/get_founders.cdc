@@ -2,7 +2,7 @@ import "DAO"
 
 // SCRIPT TO GET THE VOTES FOR THE FOUNDERS TOPIC
 
-access(all) fun main(): {Address: UInt64} {
-        let votes = DAO.getFounderVotes()
+access(all) fun main(): [Address] {
+        let votes = DAO.getAllFounders() 
         return votes  
 }
