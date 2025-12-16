@@ -13,7 +13,8 @@ contract DAO {
     access(self) var foundersTopicId: UInt64
     access(self) var founderVoteCounts: {Address: UInt64}
     access(self) var voters: {Address: Bool}
-    access(self) var founders: [Address]
+    access(self) var founders: {UInt64: Address}
+    access(self) var unclaimedFounders: @{Address: Founder} 
     // Events
     access(all) event Closed(topicId: UInt64)
     access(all) event TopicProposed(topicId: UInt64, proposer: Address, title: String, allowAnyoneAddOptions: Bool)
@@ -22,15 +23,20 @@ contract DAO {
     access(all) event OptionAdded(topicId: UInt64, optionIndex: UInt64, option: String)
     access(all) event FounderClaimed(recipient: Address)
     access(all) event VoteCounted(topicId: UInt64)
+    access(all) event FounderDeposited(recipient: Address, founderId: UInt64, path: String)
     // Entitlements
     access(all)entitlement FounderActions
     access(all)entitlement ArsenalActions
+    // Storage paths
+    access(all) let ArsenalStoragePath: StoragePath
+    access(all) let ArsenalPublicPath: PublicPath
 
     // Founder resource with privileges
     access(all) resource Founder {
         access(all) let id: UInt64
-        init(id: UInt64) {
-            self.id = id
+        init() {
+            self.id = DAO.currentFounderId
+            DAO.currentFounderId = DAO.currentFounderId + 1
         }
 
         access(FounderActions) fun proposeTopic(title: String, description: String, initialOptions: [String], allowAnyoneAddOptions: Bool): UInt64 {
@@ -44,11 +50,12 @@ contract DAO {
             
             let identifier = "\(DAO.account.address)/Topics/\(topicId)"
             let storagePath = StoragePath(identifier: identifier)!
+            let proposer = DAO.founders[self.id]!
             
             let topic <- create Topic(
                 title: title,
                 description: description,
-                proposer: self.owner!.address,
+                proposer: proposer,
                 allowAnyoneAddOptions: allowAnyoneAddOptions
             )
             
@@ -61,7 +68,7 @@ contract DAO {
             
             DAO.account.storage.save(<-topic, to: storagePath)
             
-            emit TopicProposed(topicId: topicId, proposer: self.owner!.address, title: title, allowAnyoneAddOptions: allowAnyoneAddOptions)
+            emit TopicProposed(topicId: topicId, proposer: proposer, title: title, allowAnyoneAddOptions: allowAnyoneAddOptions)
             
             return topicId
         }
@@ -84,7 +91,7 @@ contract DAO {
 
     access(all) resource Arsenal {
         access(all) let pinnacleAccount: Address
-        access(all) let founder: @{UInt64: Founder}
+        access(all) var founder: @{UInt64: Founder}
         
         init(pinnacleAccount: Address) {
             self.founder <- {}
@@ -93,6 +100,17 @@ contract DAO {
         
         access(contract) fun depositFounder(founder: @Founder) {
             self.founder[founder.id] <-! founder
+        }
+        // function to propose a topic
+        access(FounderActions) fun proposeTopic(title: String, description: String, initialOptions: [String], allowAnyoneAddOptions: Bool) {
+            pre {
+                self.founder.length > 0: "You are NOT a Founder of the DPIN DAO"
+            }
+            let founderKey = self.founder.keys[0]
+            let founder <- self.founder.remove(key: founderKey)!
+            let topicId = founder.proposeTopic(title: title, description: description, initialOptions: initialOptions, allowAnyoneAddOptions: allowAnyoneAddOptions)
+            self.founder[topicId] <-! founder
+            emit TopicProposed(topicId: topicId, proposer: self.owner!.address, title: title, allowAnyoneAddOptions: allowAnyoneAddOptions)
         }
         // function to vote on a topic
         access(ArsenalActions) fun voteTopic(topicId: UInt64, option: UInt64) {
@@ -260,8 +278,9 @@ contract DAO {
                 i = i + 1
             }
             
-            // Mark voter as having voted
+            // Mark voter as having voted (both contract-level and topic-level)
             DAO.voters[voter] = true
+            self.voters[voter] = true
         }
 
         access(all)
@@ -383,16 +402,17 @@ contract DAO {
                     
                     // Mint the Founder resource and send
                     // to the recipient
-                    let founder <- create Founder(id: DAO.currentFounderId)
+                    let founder <- create Founder()
                     // get a ref to the recipient's Founder's arsenal
                     let account = getAccount(recipientAddress)
-                    let arsenal = account.capabilities.borrow<&Arsenal>(/public/FounderArsenal)
+                    let arsenalPublicPath = PublicPath(identifier: "\(recipientAddress)/Arsenal")!
+                    let arsenal = account.capabilities.borrow<&Arsenal>(arsenalPublicPath)
                     // deposit the founder into the arsenal
                     arsenal!.depositFounder(founder: <-founder)
                     // increment the current founder id
                     DAO.currentFounderId = DAO.currentFounderId + 1
                     // add the recipient address to the founders list
-                    DAO.founders.append(recipientAddress)
+                    DAO.founders[DAO.currentFounderId] = recipientAddress
                     // increment the loop index
                     i = i + 1
                 }
@@ -457,8 +477,12 @@ contract DAO {
         return DAO.founderVoteCounts
     }
     // Public function to get all founders
-    access(all) view fun getAllFounders(): [Address] {
+    access(all) view fun getAllFounders(): {UInt64: Address} {
         return DAO.founders
+    }
+    // Public function to get all unclaimed founders
+    access(all) view fun getUnclaimedFounders():[Address] {
+        return DAO.unclaimedFounders.keys
     }
 
     // Public function to close a FounderTopic and distribute Founder resources
@@ -482,17 +506,22 @@ contract DAO {
         while i < UInt64(topAddresses.length) {
             let recipientAddress = topAddresses[i]
             
+            // add the recipient address to the founders list
+            DAO.founders[DAO.currentFounderId] = recipientAddress
             // Mint the Founder resource and send to the recipient
-            let founder <- create Founder(id: DAO.currentFounderId)
+            let founder <- create Founder()
             // get a ref to the recipient's Founder's arsenal
             let account = getAccount(recipientAddress)
-            let arsenal = account.capabilities.borrow<&Arsenal>(/public/FounderArsenal)
+            let arsenal = account.capabilities.borrow<&Arsenal>(DAO.ArsenalPublicPath)
+            // if the arsenal is nil,
+            // save founder resource inside the contract
             // deposit the founder into the arsenal
-            arsenal!.depositFounder(founder: <-founder)
-            // increment the current founder id
-            DAO.currentFounderId = DAO.currentFounderId + 1
-            // add the recipient address to the founders list
-            DAO.founders.append(recipientAddress)
+            if arsenal == nil {
+                DAO.unclaimedFounders[recipientAddress] <-! founder
+            } else {
+                arsenal!.depositFounder(founder: <-founder)
+                emit FounderDeposited(recipient: recipientAddress, founderId: DAO.currentFounderId, path: DAO.ArsenalPublicPath.toString())
+            }
             // increment the loop index
             i = i + 1
         }
@@ -539,8 +568,11 @@ contract DAO {
         self.currentFounderId = 0
         self.foundersTopicId = 0
         self.founderVoteCounts = {}
+        self.unclaimedFounders <- {}
         self.voters = {}
-        self.founders = []
+        self.founders = {}
+        self.ArsenalStoragePath = StoragePath(identifier: "\(DAO.account.address)/Arsenal")!
+        self.ArsenalPublicPath = PublicPath(identifier: "\(DAO.account.address)/Arsenal")!
         // Create the Founders topic
         let identifier = "\(DAO.account.address)/Topics/\(self.currentTopicId)"
         let storagePath = StoragePath(identifier: identifier)!

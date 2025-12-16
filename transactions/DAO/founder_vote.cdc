@@ -1,27 +1,28 @@
-import "DAO"
+import "DAO" 
  
 transaction(firstOption: Address, secondOption: Address, thirdOption: Address) {
-
+ 
     let arsenalRef: auth(DAO.ArsenalActions) &DAO.Arsenal
-
+  
 
     prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, PublishCapability, SaveValue, UnpublishCapability) &Account) {
 //<&Capability<auth(Mneme.Editions) &Mneme.Edition>>
 
-        if signer.storage.borrow<&DAO.Arsenal>(from: /storage/DPIN_DAO_Arsenal) != nil {
-            self.arsenalRef = signer.storage.borrow<auth(DAO.ArsenalActions) &DAO.Arsenal>(from: /storage/DPIN_DAO_Arsenal)!
-        } else {
+
+        if signer.storage.borrow<&DAO.Arsenal>(from: DAO.ArsenalStoragePath) != nil {
+                self.arsenalRef = signer.storage.borrow<auth(DAO.ArsenalActions) &DAO.Arsenal>(from: DAO.ArsenalStoragePath)!
+            } else {
             let arsenal <- DAO.createArsenal(parentAccount: signer)
             // save it to the account
-            signer.storage.save(<-arsenal, to: /storage/DPIN_DAO_Arsenal)
+            signer.storage.save(<-arsenal, to: DAO.ArsenalStoragePath)
             // the old "unlink"
-            let oldLink = signer.capabilities.unpublish(/public/DPIN_DAO_Arsenal)
+            let oldLink = signer.capabilities.unpublish(DAO.ArsenalPublicPath)
             // create a public capability for the arsenal
-            let collectionCap = signer.capabilities.storage.issue<&DAO.Arsenal>(/storage/DPIN_DAO_Arsenal)
-            signer.capabilities.publish(collectionCap, at: /public/DPIN_DAO_Arsenal)
+            let collectionCap = signer.capabilities.storage.issue<&DAO.Arsenal>(DAO.ArsenalStoragePath)
+            signer.capabilities.publish(collectionCap, at: DAO.ArsenalPublicPath)
         }
             // get the arsenal reference
-            let arsenalRef = signer.storage.borrow<auth(DAO.ArsenalActions) &DAO.Arsenal>(from: /storage/DPIN_DAO_Arsenal)!
+            let arsenalRef = signer.storage.borrow<auth(DAO.ArsenalActions) &DAO.Arsenal>(from: DAO.ArsenalStoragePath)!
             self.arsenalRef = arsenalRef
     }
 
