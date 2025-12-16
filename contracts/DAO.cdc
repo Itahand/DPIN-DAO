@@ -3,6 +3,8 @@
 import "FlowTransactionScheduler" 
 import "FungibleToken"
 import "FlowToken"
+// import "HybridCustody"
+// import "Pinnacle"
 
 access(all)
 contract DAO {
@@ -11,13 +13,17 @@ contract DAO {
     access(self) var foundersTopicId: UInt64
     access(self) var founderVoteCounts: {Address: UInt64}
     access(self) var voters: {Address: Bool}
-
+    // Events
     access(all) event Closed(topicId: UInt64)
     access(all) event TopicProposed(topicId: UInt64, proposer: Address, title: String, allowAnyoneAddOptions: Bool)
+    access(all) event FounderVoted(voter: Address, options: [Address])
+    access(all) event TopicVoted(voter: Address, topicId: UInt64, option: UInt64)
     access(all) event OptionAdded(topicId: UInt64, optionIndex: UInt64, option: String)
     access(all) event FounderClaimed(recipient: Address)
     access(all) event VoteCounted(topicId: UInt64)
-
+    // Entitlements
+    access(all)entitlement FounderActions
+    access(all)entitlement ArsenalActions
 
     // Founder resource with privileges
     access(all) resource Founder {
@@ -26,7 +32,7 @@ contract DAO {
             self.id = id
         }
 
-        access(all) fun proposeTopic(title: String, description: String, initialOptions: [String], allowAnyoneAddOptions: Bool): UInt64 {
+        access(FounderActions) fun proposeTopic(title: String, description: String, initialOptions: [String], allowAnyoneAddOptions: Bool): UInt64 {
             pre {
                 title.length > 0: "Title cannot be empty"
                 initialOptions.length > 1: "Must have at least two options"
@@ -59,7 +65,7 @@ contract DAO {
             return topicId
         }
 
-        access(all) fun addOption(topicId: UInt64, option: String) {
+        access(FounderActions) fun addOption(topicId: UInt64, option: String) {
             pre {
                 option.length > 0: "Option cannot be empty"
             }
@@ -75,17 +81,56 @@ contract DAO {
         }
     }
 
-    access(all) resource FounderArsenal {
+    access(all) resource Arsenal {
+        access(all) let pinnacleAccount: Address
         access(all) let founder: @{UInt64: Founder}
         
-        init() {
+        init(pinnacleAccount: Address) {
             self.founder <- {}
+            self.pinnacleAccount = pinnacleAccount
         }
         
         access(contract) fun depositFounder(founder: @Founder) {
             self.founder[founder.id] <-! founder
         }
-        
+        // function to vote on a topic
+        access(ArsenalActions) fun voteTopic(topicId: UInt64, option: UInt64) {
+            let identifier = "\(DAO.account.address)/Topics/\(topicId)"
+            let storagePath = StoragePath(identifier: identifier)!
+            let topic = DAO.account.storage.borrow<&Topic>(from: storagePath)
+                ?? panic("Topic not found")
+            
+            topic.vote(option: option, voter: self.owner!.address)
+        }
+
+        // function to add option (if allowed)
+        access(ArsenalActions) fun addOption (topicId: UInt64, option: String) {
+            pre {
+                option.length > 0: "Option cannot be empty"
+            }
+            
+            let identifier = "\(DAO.account.address)/Topics/\(topicId)"
+            let storagePath = StoragePath(identifier: identifier)!
+            let topic = DAO.account.storage.borrow<&Topic>(from: storagePath)
+                ?? panic("Topic not found")
+            
+            topic.addStringOption(option: option)
+            emit OptionAdded(topicId: topicId, optionIndex: topic.getOptionCount() - 1, option: option)
+        }  
+
+        access(ArsenalActions) fun voteFounder(options: [Address])  {
+            pre {
+                options.length > 0 && options.length <= 3: "Must provide 1-3 options"
+                DAO.voters[self.owner!.address] == nil: "You have already voted"
+            }
+            let identifier = "\(DAO.account.address)/Topics/\(0)"
+            let storagePath = StoragePath(identifier: identifier)!
+            let topic = DAO.account.storage.borrow<&Topic>(from: storagePath)
+                ?? panic("Founders topic not found")
+            topic.voteFounder(options: options)
+
+            emit FounderVoted(voter: self.owner!.address, options: options)
+        }
     }
 
     access(all)
@@ -97,7 +142,7 @@ contract DAO {
         access(all) var isFoundersTopic: Bool
         
         access(all) var stringOptions: [String]
-        access(all) var addressOptions: [Address]
+        access(self) var addressOptions: [Address]
         access(all) var votes: {UInt64: [Address]}
         access(all) var closed: Bool
         access(self) var voters: {Address: Bool}
@@ -117,7 +162,7 @@ contract DAO {
 
         access(contract) fun initFoundersTopic() {
             self.title = "Founders"
-            self.description = "Vote for the top 5 founders of the DAO"
+            self.description = "Vote for the top 5 founders of the DPIN DAO"
             self.proposer = DAO.account.address
             self.allowAnyoneAddOptions = true
             self.isFoundersTopic = true
@@ -128,6 +173,7 @@ contract DAO {
                 self.closed == false: "Topic is closed"
             }
             self.stringOptions.append(option)
+            emit OptionAdded(topicId: DAO.currentTopicId, optionIndex: UInt64(self.stringOptions.length - 1), option: option)
         }
 
         access(all) fun addAddressOption(option: Address) {
@@ -141,6 +187,7 @@ contract DAO {
                 DAO.founderVoteCounts[option] = 1
                 self.addressOptions.append(option)
             }
+            emit OptionAdded(topicId: DAO.currentTopicId, optionIndex: UInt64(self.addressOptions.length - 1), option: option.toString())
         }
 
         access(all) view fun getOptionCount(): UInt64 {
@@ -164,6 +211,51 @@ contract DAO {
             }
             self.votes[option]!.append(voter)
             self.voters[voter] = true
+        }
+
+        access(all) fun voteFounder(options: [Address]) {
+            pre {
+                self.isFoundersTopic: "This function is only for founders topic"
+                options.length > 0 && options.length <= 3: "Must provide 1-3 options"
+                DAO.voters[self.owner!.address] == nil: "You have already voted"
+            }
+            
+            // add each address option and vote for it
+            var i: UInt64 = 0
+            while i < UInt64(options.length) {
+                let address = options[i]
+                
+                // Find the index of this address in addressOptions
+                var optionIndex: UInt64? = nil
+                var j: UInt64 = 0
+                while j < UInt64(self.addressOptions.length) {
+                    if self.addressOptions[j] == address {
+                        optionIndex = j
+                        break
+                    }
+                    j = j + 1
+                }
+                
+                // If address not found in options, add it first
+                if optionIndex == nil {
+                    self.addAddressOption(option: address)
+                    optionIndex = UInt64(self.addressOptions.length) - 1
+                }
+                
+                // Initialize votes array for this option if needed
+                if self.votes[optionIndex!] == nil {
+                    self.votes[optionIndex!] = []
+                }
+                
+                // Vote for the address using its actual index in addressOptions
+                self.votes[optionIndex!]!.append(self.owner!.address)
+                
+                // increment the loop index
+                i = i + 1
+            }
+            
+            // Mark voter as having voted
+            DAO.voters[self.owner!.address] = true
         }
 
         access(all)
@@ -241,6 +333,11 @@ contract DAO {
             
             return result
         }
+        // return a list of addresses only
+        access(all)
+        view fun getAllAddresses(): [Address] {
+            return self.addressOptions
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -272,7 +369,7 @@ contract DAO {
                     let founder <- create Founder(id: DAO.currentFounderId)
                     // get a ref to the recipient's Founder's arsenal
                     let account = getAccount(recipientAddress)
-                    let arsenal = account.capabilities.borrow<&FounderArsenal>(/public/FounderArsenal)
+                    let arsenal = account.capabilities.borrow<&Arsenal>(/public/FounderArsenal)
                     // deposit the founder into the arsenal
                     arsenal!.depositFounder(founder: <-founder)
                     // increment the current founder id
@@ -286,75 +383,46 @@ contract DAO {
         }
     }
 
-    // Public function to vote on founders topic
-    access(all) fun voteFounder(voter: Address, options: [Address]) {
-        pre {
-            options.length > 0 && options.length <= 3: "Must provide 1-3 options"
-            DAO.voters[voter] == nil: "You have already voted"
-        }
-        
-        let identifier = "\(DAO.account.address)/Topics/\(self.foundersTopicId)"
-        let storagePath = StoragePath(identifier: identifier)!
-        let topic = DAO.account.storage.borrow<&Topic>(from: storagePath)
-            ?? panic("Founders topic not found")
-        
-        // Add each address option and vote for it
-        var i: UInt64 = 0
-        while i < UInt64(options.length) {
-            let address = options[i]
-            // Check if address already exists in options
-            var optionIndex: UInt64? = nil
-            var j: UInt64 = 0
-            while j < UInt64(topic.addressOptions.length) {
-                if topic.addressOptions[j] == address {
-                    optionIndex = j
-                    break
+    // Public function to vote get all votes
+    // on FOUNDER TOPICs
+    access(all) fun getFounderVotes(): {Address: UInt64} {
+        return DAO.founderVoteCounts
+    }
+
+
+    // Public function to create an Arsenal
+    access(all) fun createArsenal(parentAccount: &Account): @Arsenal {
+        let newArsenal <- create Arsenal(pinnacleAccount: parentAccount.address)
+        return <- newArsenal
+        // We need to verify that the parent account is a manager
+        // of a Pinnacle Collection owner child account
+/*      let manager = parentAccount.capabilities.borrow<&HybridCustody.Manager>(HybridCustody.ManagerPublicPath)
+        ?? panic("manager not found")
+        // Get children of the parent account
+        var children = manager.getChildAddresses()
+
+        if children.length > 0 {
+            var childAddress: Address? = nil
+            // loop through each child and look for
+            // /public/PinnacleCollection
+            var i: UInt64 = 0
+            while i < UInt64(children.length) {
+                let child = children[i]
+                let childAcct = getAccount(child)
+                let childManager = childAcct.capabilities.borrow<&Pinnacle.Collection>(Pinnacle.CollectionPublicPath)
+                if childManager != nil {
+                    let ids = childManager!.getIDs()
+                    if ids.length > 9 {
+                        let newArsenal <- create Arsenal(pinnacleAccount: child)
+                        return <- newArsenal
+                    }
                 }
-                j = j + 1
+                i = i + 1
             }
-            
-            // If not found, add it
-            if optionIndex == nil {
-                topic.addAddressOption(option: address)
-                optionIndex = UInt64(topic.addressOptions.length) - 1
-            } else {
-                // Increment vote count for existing address
-                DAO.founderVoteCounts[address] = DAO.founderVoteCounts[address]! + 1
-            }
-            
-            // Vote for this option
-            topic.vote(option: optionIndex!, voter: voter)
-            i = i + 1
-        }
-        
-        DAO.voters[voter] = true
+            panic("No Pinnacle Collection owner child account found with more than 9 NFTs")
+        } 
+            return nil */
     }
-
-    // Public function to vote on regular topic
-    access(all) fun voteTopic(voter: Address, topicId: UInt64, option: UInt64) {
-        let identifier = "\(DAO.account.address)/Topics/\(topicId)"
-        let storagePath = StoragePath(identifier: identifier)!
-        let topic = DAO.account.storage.borrow<&Topic>(from: storagePath)
-            ?? panic("Topic not found")
-        
-        topic.vote(option: option, voter: voter)
-    }
-
-    // Public function to add option (if allowed)
-    access(all) fun addOption(proposer: Address, topicId: UInt64, option: String) {
-        pre {
-            option.length > 0: "Option cannot be empty"
-        }
-        
-        let identifier = "\(DAO.account.address)/Topics/\(topicId)"
-        let storagePath = StoragePath(identifier: identifier)!
-        let topic = DAO.account.storage.borrow<&Topic>(from: storagePath)
-            ?? panic("Topic not found")
-        
-        topic.addStringOption(option: option)
-        emit OptionAdded(topicId: topicId, optionIndex: topic.getOptionCount() - 1, option: option)
-    }
-
 
     init() {
         self.currentTopicId = 0

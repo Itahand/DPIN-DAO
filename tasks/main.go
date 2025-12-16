@@ -22,8 +22,13 @@ func main() {
 
 	color.Green("Setup bob account for ArtDrop collection")
 	// Setup artist account for ArtDrop collection
-	o.Tx("Mneme/setup",
-		WithSigner("bob"),
+	o.Tx("DAO/founder_vote",
+		WithSigner("account"),
+		WithArg("firstOption", "bob"),
+		WithArg("secondOption", "alice"),
+		WithArg("thirdOption", "account"),
 	).Print()
+
+	o.Script("get_founder_votes").Print()
 
 }
