@@ -169,13 +169,17 @@
 				"location": "emulator-account.pkey"
 			}
 		},
+		"emulator-alice": {
+			"address": "179b6b1cb6755e31",
+			"key": "7d83b4ce78fe1366e9a39001020450f348669355dfbebb94b23fc1578122d78d"
+		},
 		"emulator-bob": {
 			"address": "f3fcd2c1a78f5eee",
 			"key": "3b90c6ed0051a32a9bbbd8d584d04f9db4948a63974e0a4ac70d637193d7e4c7"
 		},
-		"emulator-alice": {
-			"address": "179b6b1cb6755e31",
-			"key": "7d83b4ce78fe1366e9a39001020450f348669355dfbebb94b23fc1578122d78d"
+		"emulator-tito": {
+			"address": "e03daebed8ca0615",
+			"key": "7082dc9dd0cb9abd662313db68654658779949761abb30be8276009ccdc8af18"
 		}
 	},
 	"deployments": {
@@ -183,8 +187,8 @@
 			"emulator-account": [
 				"DAO"
 			],
-			"emulator-bob": [],
-			"emulator-alice": []
+			"emulator-alice": [],
+			"emulator-bob": []
 		}
 	}
 }

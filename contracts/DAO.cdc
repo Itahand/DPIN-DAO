@@ -127,7 +127,7 @@ contract DAO {
             let storagePath = StoragePath(identifier: identifier)!
             let topic = DAO.account.storage.borrow<&Topic>(from: storagePath)
                 ?? panic("Founders topic not found")
-            topic.voteFounder(options: options)
+            topic.voteFounder(options: options, voter: self.owner!.address)
 
             emit FounderVoted(voter: self.owner!.address, options: options)
         }
@@ -180,11 +180,9 @@ contract DAO {
             pre {
                 self.closed == false: "Topic is closed"
             }
-            // Check if address already exists, if so increment count
-            if DAO.founderVoteCounts[option] != nil {
-                DAO.founderVoteCounts[option] = DAO.founderVoteCounts[option]! + 1
-            } else {
-                DAO.founderVoteCounts[option] = 1
+            // Only add the address to the options list if it doesn't exist
+            // Vote counting is handled in voteFounder, not here
+            if !self.addressOptions.contains(option) {
                 self.addressOptions.append(option)
             }
             emit OptionAdded(topicId: DAO.currentTopicId, optionIndex: UInt64(self.addressOptions.length - 1), option: option.toString())
@@ -213,11 +211,11 @@ contract DAO {
             self.voters[voter] = true
         }
 
-        access(all) fun voteFounder(options: [Address]) {
+        access(all) fun voteFounder(options: [Address], voter: Address) {
             pre {
                 self.isFoundersTopic: "This function is only for founders topic"
                 options.length > 0 && options.length <= 3: "Must provide 1-3 options"
-                DAO.voters[self.owner!.address] == nil: "You have already voted"
+                DAO.voters[voter] == nil: "You have already voted"
             }
             
             // add each address option and vote for it
@@ -248,14 +246,21 @@ contract DAO {
                 }
                 
                 // Vote for the address using its actual index in addressOptions
-                self.votes[optionIndex!]!.append(self.owner!.address)
+                self.votes[optionIndex!]!.append(voter)
+                
+                // Update founderVoteCounts for this address
+                if DAO.founderVoteCounts[address] != nil {
+                    DAO.founderVoteCounts[address] = DAO.founderVoteCounts[address]! + 1
+                } else {
+                    DAO.founderVoteCounts[address] = 1
+                }
                 
                 // increment the loop index
                 i = i + 1
             }
             
             // Mark voter as having voted
-            DAO.voters[self.owner!.address] = true
+            DAO.voters[voter] = true
         }
 
         access(all)
