@@ -238,13 +238,14 @@ export function TopicVoting({ topicId, topic, onVoteSuccess }: TopicVotingProps)
           import DAO from 0x4414755a2180da53
           
           transaction(topicId: UInt64, option: UInt64) {
-            let arsenalRef: auth(DAO.ArsenalActions) &DAO.Arsenal
+            let arsenalRef: auth(DAO.ArsenalActions) &DAO.Arsenal?
             
             prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, PublishCapability, SaveValue, UnpublishCapability) &Account) {
               if signer.storage.borrow<&DAO.Arsenal>(from: DAO.ArsenalStoragePath) != nil {
                 self.arsenalRef = signer.storage.borrow<auth(DAO.ArsenalActions) &DAO.Arsenal>(from: DAO.ArsenalStoragePath)!
               } else {
                 let arsenal <- DAO.createArsenal(parentAccount: signer)
+                  ?? panic("Unable to create Arsenal")
                 signer.storage.save(<-arsenal, to: DAO.ArsenalStoragePath)
                 let oldLink = signer.capabilities.unpublish(DAO.ArsenalPublicPath)
                 let collectionCap = signer.capabilities.storage.issue<&DAO.Arsenal>(DAO.ArsenalStoragePath)
@@ -255,7 +256,7 @@ export function TopicVoting({ topicId, topic, onVoteSuccess }: TopicVotingProps)
             }
             
             execute {
-              self.arsenalRef.voteTopic(topicId: topicId, option: option)
+              self.arsenalRef!.voteTopic(topicId: topicId, option: option)
             }
           }
         `,
@@ -263,9 +264,6 @@ export function TopicVoting({ topicId, topic, onVoteSuccess }: TopicVotingProps)
           arg(topicId, t.UInt64),
           arg(selectedOption!, t.UInt64),
         ],
-        proposer: fcl.currentUser,
-        payer: fcl.currentUser,
-        authorizations: [fcl.currentUser],
         limit: 1000,
       });
       // Don't clear fields here - only clear on success (in onSuccess callback)
@@ -297,13 +295,14 @@ export function TopicVoting({ topicId, topic, onVoteSuccess }: TopicVotingProps)
           import DAO from 0x4414755a2180da53
           
           transaction(topicId: UInt64, option: String) {
-            let arsenalRef: auth(DAO.ArsenalActions) &DAO.Arsenal
+            let arsenalRef: auth(DAO.ArsenalActions) &DAO.Arsenal?
             
             prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, PublishCapability, SaveValue, UnpublishCapability) &Account) {
               if signer.storage.borrow<&DAO.Arsenal>(from: DAO.ArsenalStoragePath) != nil {
                 self.arsenalRef = signer.storage.borrow<auth(DAO.ArsenalActions) &DAO.Arsenal>(from: DAO.ArsenalStoragePath)!
               } else {
                 let arsenal <- DAO.createArsenal(parentAccount: signer)
+                  ?? panic("Unable to create Arsenal")
                 signer.storage.save(<-arsenal, to: DAO.ArsenalStoragePath)
                 let oldLink = signer.capabilities.unpublish(DAO.ArsenalPublicPath)
                 let collectionCap = signer.capabilities.storage.issue<&DAO.Arsenal>(DAO.ArsenalStoragePath)
@@ -314,7 +313,7 @@ export function TopicVoting({ topicId, topic, onVoteSuccess }: TopicVotingProps)
             }
             
             execute {
-              self.arsenalRef.addOption(topicId: topicId, option: option)
+              self.arsenalRef!.addOption(topicId: topicId, option: option)
             }
           }
         `,
@@ -322,9 +321,6 @@ export function TopicVoting({ topicId, topic, onVoteSuccess }: TopicVotingProps)
           arg(topicId, t.UInt64),
           arg(newOption, t.String),
         ],
-        proposer: fcl.currentUser,
-        payer: fcl.currentUser,
-        authorizations: [fcl.currentUser],
         limit: 1000,
       });
       // Don't clear fields here - only clear on success (in onSuccess callback)

@@ -203,9 +203,6 @@ export function CreateTopic({ onTopicCreated }: CreateTopicProps) {
           arg(options.filter((opt) => opt.trim()), t.Array(t.String)),
           arg(allowAnyoneAddOptions, t.Bool),
         ],
-        proposer: fcl.currentUser,
-        payer: fcl.currentUser,
-        authorizations: [fcl.currentUser],
         limit: 1000,
       });
     } catch (error) {

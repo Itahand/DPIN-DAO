@@ -32,8 +32,9 @@ export function FoundersVoting() {
   console.log("FoundersVoting - votesLoading:", votesLoading);
   console.log("FoundersVoting - votesError:", votesError);
   console.log("FoundersVoting - founderVotes data:", founderVotes);
-  console.log("FoundersVoting - founderVotes keys:", founderVotes ? Object.keys(founderVotes) : []);
-  console.log("FoundersVoting - founderVotes length:", founderVotes ? Object.keys(founderVotes).length : 0);
+  const founderVotesObj = (founderVotes ?? {}) as Record<string, unknown>;
+  console.log("FoundersVoting - founderVotes keys:", Object.keys(founderVotesObj));
+  console.log("FoundersVoting - founderVotes length:", Object.keys(founderVotesObj).length);
 
   const { mutate, isPending, error: mutateError, data: txId } = useFlowMutate({
     mutation: {
@@ -154,13 +155,14 @@ export function FoundersVoting() {
           import DAO from 0x4414755a2180da53
           
           transaction(firstOption: Address, secondOption: Address, thirdOption: Address) {
-            let arsenalRef: auth(DAO.ArsenalActions) &DAO.Arsenal
+            let arsenalRef: auth(DAO.ArsenalActions) &DAO.Arsenal?
             
             prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, PublishCapability, SaveValue, UnpublishCapability) &Account) {
               if signer.storage.borrow<&DAO.Arsenal>(from: DAO.ArsenalStoragePath) != nil {
                 self.arsenalRef = signer.storage.borrow<auth(DAO.ArsenalActions) &DAO.Arsenal>(from: DAO.ArsenalStoragePath)!
               } else {
                 let arsenal <- DAO.createArsenal(parentAccount: signer)
+                  ?? panic("Unable to create Arsenal")
                 signer.storage.save(<-arsenal, to: DAO.ArsenalStoragePath)
                 let oldLink = signer.capabilities.unpublish(DAO.ArsenalPublicPath)
                 let collectionCap = signer.capabilities.storage.issue<&DAO.Arsenal>(DAO.ArsenalStoragePath)
@@ -172,7 +174,7 @@ export function FoundersVoting() {
             
             execute {
               let options = [firstOption, secondOption, thirdOption]
-              self.arsenalRef.voteFounder(options: options)
+              self.arsenalRef!.voteFounder(options: options)
             }
           }
         `,
@@ -181,9 +183,6 @@ export function FoundersVoting() {
           arg(secondOption, t.Address),
           arg(thirdOption, t.Address),
         ],
-        proposer: fcl.currentUser,
-        payer: fcl.currentUser,
-        authorizations: [fcl.currentUser],
         limit: 1000,
       });
     } catch (error) {
@@ -203,13 +202,13 @@ export function FoundersVoting() {
         <p className="text-sm text-black/60 dark:text-white/60 mb-6">
           Connect your wallet to vote for founders
         </p>
-        {!votesLoading && founderVotes && Object.keys(founderVotes).length > 0 && (
+        {!votesLoading && Object.keys(founderVotesObj).length > 0 && (
           <div className="mt-6 pt-6 border-t border-black/10 dark:border-white/10">
             <h4 className="text-sm font-semibold text-black dark:text-white mb-3">
               Current Votes
             </h4>
             <div className="space-y-2">
-              {Object.entries(founderVotes).map(([address, votes]) => (
+              {Object.entries(founderVotesObj).map(([address, votes]) => (
                 <div
                   key={address}
                   className="flex justify-between items-center text-sm"
@@ -312,13 +311,13 @@ export function FoundersVoting() {
         {isPending ? "Submitting..." : pendingTxId ? "Waiting for confirmation..." : "Submit Vote"}
       </button>
 
-      {!votesLoading && founderVotes && Object.keys(founderVotes).length > 0 && (
+      {!votesLoading && Object.keys(founderVotesObj).length > 0 && (
         <div className="mt-6 pt-6 border-t border-black/10 dark:border-white/10">
           <h4 className="text-sm font-semibold text-black dark:text-white mb-3">
             Current Votes
           </h4>
           <div className="space-y-2">
-            {Object.entries(founderVotes).map(([address, votes]) => (
+            {Object.entries(founderVotesObj).map(([address, votes]) => (
               <div
                 key={address}
                 className="flex justify-between items-center text-sm"
@@ -334,7 +333,7 @@ export function FoundersVoting() {
           </div>
         </div>
       )}
-      {!votesLoading && founderVotes && Object.keys(founderVotes).length === 0 && (
+      {!votesLoading && Object.keys(founderVotesObj).length === 0 && (
         <div className="mt-6 pt-6 border-t border-black/10 dark:border-white/10">
           <p className="text-sm text-black/60 dark:text-white/60">
             No votes yet. Be the first to vote!

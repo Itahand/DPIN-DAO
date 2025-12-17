@@ -1,7 +1,7 @@
 import "DAO" 
  
 transaction(firstOption: Address, secondOption: Address, thirdOption: Address) {
-    let arsenalRef: auth(DAO.ArsenalActions) &DAO.Arsenal
+    let arsenalRef: auth(DAO.ArsenalActions) &DAO.Arsenal?
   
 
     prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, PublishCapability, SaveValue, UnpublishCapability) &Account) {
@@ -25,9 +25,9 @@ transaction(firstOption: Address, secondOption: Address, thirdOption: Address) {
             self.arsenalRef = arsenalRef
     }
 
-    execute {
+    execute { 
         let options = [firstOption, secondOption, thirdOption]
-        self.arsenalRef.voteFounder(options: options)
+        self.arsenalRef!.voteFounder(options: options)
         
     }
 }
