@@ -22,12 +22,12 @@ func main() {
 
 	color.Green("Setup bob account for DAO-Pin collection")
 	// Vote on the founders topic
-	/* 	o.Tx("DAO/founder_vote",
+	o.Tx("DAO/founder_vote",
 		WithSigner("alice"),
 		WithArg("firstOption", "bob"),
 		WithArg("secondOption", "alice"),
 		WithArg("thirdOption", "tito"),
-	).Print() */
+	).Print()
 	// Fetch the votes for the founders topic
 	// Bob votes
 	/* 	o.Tx("DAO/founder_vote",
@@ -46,19 +46,19 @@ func main() {
 	// get unclaimed founders
 	o.Script("get_unclaimed_founders").Print()
 	// Founder creates a new topic
-	o.Tx("DAO/Founder/create_topic",
-		WithSigner("bob"),
-		WithArg("title", "Amount of keys used"),
-		WithArg("description", "Vote for amount of keys used"),
-		WithArg("initialOptions", `["10", "20", "30", "40", "50"]`),
-		WithArg("allowAnyoneAddOptions", true),
-	).Print()
-	// alice votes on the new topic
-	o.Tx("DAO/vote_topic",
-		WithSigner("alice"),
-		WithArg("topicId", 1),
-		WithArg("option", 0),
-	).Print()
+	/* 	o.Tx("DAO/Founder/create_topic",
+	   		WithSigner("bob"),
+	   		WithArg("title", "Amount of keys used"),
+	   		WithArg("description", "Vote for amount of keys used"),
+	   		WithArg("initialOptions", `["10", "20", "30", "40", "50"]`),
+	   		WithArg("allowAnyoneAddOptions", true),
+	   	).Print()
+	   	// alice votes on the new topic
+	   	o.Tx("DAO/vote_topic",
+	   		WithSigner("alice"),
+	   		WithArg("topicId", 1),
+	   		WithArg("option", 0),
+	   	).Print() */
 	o.Script("get_latest_topics").Print()
 
 	/*

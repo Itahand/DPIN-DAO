@@ -220,11 +220,11 @@
 		},
 		"testnet": {
 			"testnet-alice": [],
-			"testnet-bob": [],
-			"testnet-dpin-dao": [],
-			"testnet-tito": [
+			"testnet-bob": [
 				"DAO"
-			]
+			],
+			"testnet-dpin-dao": [],
+			"testnet-tito": []
 		}
 	}
 }

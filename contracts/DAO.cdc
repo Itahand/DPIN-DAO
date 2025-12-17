@@ -18,6 +18,7 @@ contract DAO {
     // Events
     access(all) event Closed(topicId: UInt64)
     access(all) event TopicProposed(topicId: UInt64, proposer: Address, title: String, allowAnyoneAddOptions: Bool)
+    access(all) event TopicScheduled(topicId: UInt64, handlerPath: String)
     access(all) event FounderVoted(voter: Address, options: [Address])
     access(all) event TopicVoted(voter: Address, topicId: UInt64, option: UInt64)
     access(all) event OptionAdded(topicId: UInt64, optionIndex: UInt64, option: String)
@@ -39,7 +40,7 @@ contract DAO {
             DAO.currentFounderId = DAO.currentFounderId + 1
         }
 
-        access(FounderActions) fun proposeTopic(title: String, description: String, initialOptions: [String], allowAnyoneAddOptions: Bool): UInt64 {
+        access(FounderActions) fun proposeTopic(title: String, description: String, initialOptions: [String], allowAnyoneAddOptions: Bool) {
             pre {
                 title.length > 0: "Title cannot be empty"
                 initialOptions.length > 1: "Must have at least two options"
@@ -67,10 +68,37 @@ contract DAO {
             }
             
             DAO.account.storage.save(<-topic, to: storagePath)
+
+            // Schedule vote count for 7 days from this block
+            let delay: UFix64 = 7.0 * 24.0 * 60.0 * 60.0
+            let future = getCurrentBlock().timestamp + delay
+            let priority = FlowTransactionScheduler.Priority.Medium
+            let executionEffort: UInt64 = 1000
+
+            // Withdraw FLOW fees from contract account vault
+            let vaultRef = DAO.account.storage.borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>(from: /storage/flowTokenVault)
+                ?? panic("Missing FlowToken vault in contract account")
+            let fees <- vaultRef.withdraw(amount: 0.0) as! @FlowToken.Vault
+            let handlerStoragePath = StoragePath(identifier: "\(DAO.account.address)/DAO_Handler")!
+                    let handlerCap = DAO.account.capabilities.storage
+            .issue<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>(storagePath)
+            let receipt <- FlowTransactionScheduler.schedule(
+            handlerCap: handlerCap,
+            data: "",
+            timestamp: future,
+            priority: priority,
+            executionEffort: executionEffort,
+            fees: <-fees
+        )
+
+        // Store receipt
+        let receiptIdentifier = "\(DAO.account.address)/DAO_Receipts/\(receipt.id)"
+        let receiptStoragePath = StoragePath(identifier: receiptIdentifier)!
+        DAO.account.storage.save(<-receipt, to: receiptStoragePath)
             
-            emit TopicProposed(topicId: topicId, proposer: proposer, title: title, allowAnyoneAddOptions: allowAnyoneAddOptions)
+        emit TopicProposed(topicId: topicId, proposer: proposer, title: title, allowAnyoneAddOptions: allowAnyoneAddOptions)
+        emit TopicScheduled(topicId: topicId, handlerPath: handlerStoragePath.toString())
             
-            return topicId
         }
 
         access(FounderActions) fun addOption(topicId: UInt64, option: String) {
@@ -108,9 +136,9 @@ contract DAO {
             }
             let founderKey = self.founder.keys[0]
             let founder <- self.founder.remove(key: founderKey)!
-            let topicId = founder.proposeTopic(title: title, description: description, initialOptions: initialOptions, allowAnyoneAddOptions: allowAnyoneAddOptions)
-            self.founder[topicId] <-! founder
-            emit TopicProposed(topicId: topicId, proposer: self.owner!.address, title: title, allowAnyoneAddOptions: allowAnyoneAddOptions)
+            founder.proposeTopic(title: title, description: description, initialOptions: initialOptions, allowAnyoneAddOptions: allowAnyoneAddOptions)
+            self.founder[founderKey] <-! founder
+
         }
         // function to vote on a topic
         access(ArsenalActions) fun voteTopic(topicId: UInt64, option: UInt64) {
@@ -154,7 +182,7 @@ contract DAO {
 
     access(all)
     resource Topic {
-        access(all) var topicId: UInt64
+        access(all) var id: UInt64
         access(all) var title: String
         access(all) var description: String
         access(all) var proposer: Address
@@ -168,7 +196,7 @@ contract DAO {
         access(all) var voters: {Address: Bool}
 
         init(title: String, description: String, proposer: Address, allowAnyoneAddOptions: Bool) {
-            self.topicId = DAO.currentTopicId
+            self.id = DAO.currentTopicId
             self.title = title
             self.description = description
             self.proposer = proposer
@@ -181,6 +209,53 @@ contract DAO {
             self.voters = {}
 
             DAO.currentTopicId = DAO.currentTopicId + 1
+
+            // Create and save handler 
+            let handlerIdentifier = "\(DAO.account.address)/DAO_Handler/\(self.id)"
+            let handlerStoragePath = StoragePath(identifier: handlerIdentifier)!
+            let handler <- create Handler(topicId: self.id)
+            DAO.account.storage.save(<-handler, to: handlerStoragePath)
+            // Issue handler capability to the handler
+            let handlerCap = DAO.account.capabilities.storage
+                .issue<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>(handlerStoragePath)
+
+            // Schedule vote count for 7 days from this block
+            let delay: UFix64 = 7.0 * 24.0 * 60.0 * 60.0
+            let future = getCurrentBlock().timestamp + delay
+            let priority = FlowTransactionScheduler.Priority.Medium
+            let executionEffort: UInt64 = 1000
+            // Estimate the cost
+            let estimate = FlowTransactionScheduler.estimate(
+            data: "",
+            timestamp: future,
+            priority: priority,
+            executionEffort: executionEffort
+            )
+
+            assert(
+                estimate.timestamp != nil || priority == FlowTransactionScheduler.Priority.Low,
+                message: estimate.error ?? "estimation failed"
+            )
+            // Withdraw FLOW fees from contract account vault
+            let vaultRef = DAO.account.storage.borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>(from: /storage/flowTokenVault)
+                ?? panic("Missing FlowToken vault in contract account")
+            let fees <- vaultRef.withdraw(amount: estimate.flowFee ?? 0.0) as! @FlowToken.Vault
+            let receipt <- FlowTransactionScheduler.schedule(
+            handlerCap: handlerCap,
+            data: "",
+            timestamp: future,
+            priority: priority,
+            executionEffort: executionEffort,
+            fees: <-fees
+            )
+        
+            // Store receipt
+            let receiptIdentifier = "\(DAO.account.address)/DAO_Receipts/\(receipt.id)"
+            let receiptStoragePath = StoragePath(identifier: receiptIdentifier)!
+            DAO.account.storage.save(<-receipt, to: receiptStoragePath)
+
+            emit TopicScheduled(topicId: self.id, handlerPath: handlerStoragePath.toString())
+
         }
 
         access(contract) fun initFoundersTopic() {
@@ -664,53 +739,7 @@ contract DAO {
         foundersTopic.initFoundersTopic()
         DAO.account.storage.save(<-foundersTopic, to: storagePath)
         
-        // Schedule vote count for 3 minutes
-        let delay: UFix64 = 3.0 * 60.0
-        let future = getCurrentBlock().timestamp + delay
-        let priority = FlowTransactionScheduler.Priority.Medium
-        let executionEffort: UInt64 = 1000
-        
-        let estimate = FlowTransactionScheduler.estimate(
-            data: self.foundersTopicId,
-            timestamp: future,
-            priority: priority,
-            executionEffort: executionEffort
-        )
-        
-        assert(
-            estimate.timestamp != nil || priority == FlowTransactionScheduler.Priority.Low,
-            message: estimate.error ?? "estimation failed"
-        )
-        
-        // Withdraw FLOW fees from contract account vault
-        let vaultRef = DAO.account.storage.borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>(from: /storage/flowTokenVault)
-            ?? panic("Missing FlowToken vault in contract account")
-        let fees <- vaultRef.withdraw(amount: estimate.flowFee ?? 0.0) as! @FlowToken.Vault
-        
-        // Create and save handler if not exists
-        let handlerIdentifier = "\(DAO.account.address)/DAO_Handler"
-        let handlerStoragePath = StoragePath(identifier: handlerIdentifier)!
-        if DAO.account.storage.borrow<&Handler>(from: handlerStoragePath) == nil {
-            let handler <- create Handler(topicId: self.currentTopicId -1)
-            DAO.account.storage.save(<-handler, to: handlerStoragePath)
-        }
-        
-        // Issue handler capability
-        let handlerCap = DAO.account.capabilities.storage
-            .issue<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>(handlerStoragePath)
-        
-        let receipt <- FlowTransactionScheduler.schedule(
-            handlerCap: handlerCap,
-            data: "",
-            timestamp: future,
-            priority: priority,
-            executionEffort: executionEffort,
-            fees: <-fees
-        )
-        
-        // Store receipt
-        let receiptIdentifier = "\(DAO.account.address)/DAO_Receipts/\(receipt.id)"
-        let receiptStoragePath = StoragePath(identifier: receiptIdentifier)!
-        DAO.account.storage.save(<-receipt, to: receiptStoragePath)
+
+
     }
 }
