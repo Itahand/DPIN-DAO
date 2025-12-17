@@ -48,7 +48,7 @@ contract DAO {
             DAO.currentTopicId = DAO.currentTopicId + 1
             let topicId = DAO.currentTopicId
             
-            let identifier = "\(DAO.account.address)/Topics/\(topicId)"
+            let identifier = "\(DAO.account.address)/DAO_Topics/\(topicId)"
             let storagePath = StoragePath(identifier: identifier)!
             let proposer = DAO.founders[self.id]!
             
@@ -78,7 +78,7 @@ contract DAO {
                 option.length > 0: "Option cannot be empty"
             }
             
-            let identifier = "\(DAO.account.address)/Topics/\(topicId)"
+            let identifier = "\(DAO.account.address)/DAO_Topics/\(topicId)"
             let storagePath = StoragePath(identifier: identifier)!
             let topic = DAO.account.storage.borrow<&Topic>(from: storagePath)
                 ?? panic("Topic not found")
@@ -114,7 +114,7 @@ contract DAO {
         }
         // function to vote on a topic
         access(ArsenalActions) fun voteTopic(topicId: UInt64, option: UInt64) {
-            let identifier = "\(DAO.account.address)/Topics/\(topicId)"
+            let identifier = "\(DAO.account.address)/DAO_Topics/\(topicId)"
             let storagePath = StoragePath(identifier: identifier)!
             let topic = DAO.account.storage.borrow<&Topic>(from: storagePath)
                 ?? panic("Topic not found")
@@ -128,7 +128,7 @@ contract DAO {
                 option.length > 0: "Option cannot be empty"
             }
             
-            let identifier = "\(DAO.account.address)/Topics/\(topicId)"
+            let identifier = "\(DAO.account.address)/DAO_Topics/\(topicId)"
             let storagePath = StoragePath(identifier: identifier)!
             let topic = DAO.account.storage.borrow<&Topic>(from: storagePath)
                 ?? panic("Topic not found")
@@ -142,7 +142,7 @@ contract DAO {
                 options.length > 0 && options.length <= 3: "Must provide 1-3 options"
                 DAO.voters[self.owner!.address] == nil: "You have already voted"
             }
-            let identifier = "\(DAO.account.address)/Topics/\(0)"
+            let identifier = "\(DAO.account.address)/DAO_Topics/0"
             let storagePath = StoragePath(identifier: identifier)!
             let topic = DAO.account.storage.borrow<&Topic>(from: storagePath)
                 ?? panic("Founders topic not found")
@@ -154,6 +154,7 @@ contract DAO {
 
     access(all)
     resource Topic {
+        access(all) var topicId: UInt64
         access(all) var title: String
         access(all) var description: String
         access(all) var proposer: Address
@@ -161,12 +162,13 @@ contract DAO {
         access(all) var isFoundersTopic: Bool
         
         access(all) var stringOptions: [String]
-        access(self) var addressOptions: [Address]
+        access(all) var addressOptions: [Address]
         access(all) var votes: {UInt64: [Address]}
         access(all) var closed: Bool
-        access(self) var voters: {Address: Bool}
+        access(all) var voters: {Address: Bool}
 
         init(title: String, description: String, proposer: Address, allowAnyoneAddOptions: Bool) {
+            self.topicId = DAO.currentTopicId
             self.title = title
             self.description = description
             self.proposer = proposer
@@ -177,6 +179,8 @@ contract DAO {
             self.votes = {}
             self.closed = false
             self.voters = {}
+
+            DAO.currentTopicId = DAO.currentTopicId + 1
         }
 
         access(contract) fun initFoundersTopic() {
@@ -363,6 +367,23 @@ contract DAO {
         view fun getAllAddresses(): [Address] {
             return self.addressOptions
         }
+
+        // return TopicInfo struct with all topic data
+        access(all)
+        fun getTopicInfo(): TopicInfo {
+            return TopicInfo(
+                title: self.title,
+                description: self.description,
+                proposer: self.proposer,
+                allowAnyoneAddOptions: self.allowAnyoneAddOptions,
+                isFoundersTopic: self.isFoundersTopic,
+                stringOptions: self.stringOptions,
+                addressOptions: self.addressOptions,
+                votes: self.votes,
+                closed: self.closed,
+                voters: self.voters
+            )
+        }
     }
     // -----------------------------------------------------------------------
     // "##  ##      ##      ##  ##    ##  ##    ##      ##      ####  "
@@ -383,7 +404,7 @@ contract DAO {
         }
         // This is the function executed by the Flow Protocol
         access(FlowTransactionScheduler.Execute) fun executeTransaction(id: UInt64, data: AnyStruct?) {
-            let identifier = "\(DAO.account.address)/Topics/\(self.topicId)"
+            let identifier = "\(DAO.account.address)/DAO_Topics/\(self.topicId)"
             let storagePath = StoragePath(identifier: identifier)!
             let topic = DAO.account.storage.borrow<&Topic>(from: storagePath)
                 ?? panic("Unable to borrow reference to the topic")
@@ -400,22 +421,27 @@ contract DAO {
                 while i < UInt64(topAddresses.length) {
                     let recipientAddress = topAddresses[i]
                     
-                    // Mint the Founder resource and send
-                    // to the recipient
+                    // add the recipient address to the founders list
+                    DAO.founders[DAO.currentFounderId] = recipientAddress
+                    // Mint the Founder resource and send to the recipient
                     let founder <- create Founder()
                     // get a ref to the recipient's Founder's arsenal
                     let account = getAccount(recipientAddress)
-                    let arsenalPublicPath = PublicPath(identifier: "\(recipientAddress)/Arsenal")!
-                    let arsenal = account.capabilities.borrow<&Arsenal>(arsenalPublicPath)
+                    let arsenal = account.capabilities.borrow<&Arsenal>(DAO.ArsenalPublicPath)
+                    // if the arsenal is nil,
+                    // save founder resource inside the contract
                     // deposit the founder into the arsenal
-                    arsenal!.depositFounder(founder: <-founder)
-                    // increment the current founder id
-                    DAO.currentFounderId = DAO.currentFounderId + 1
-                    // add the recipient address to the founders list
-                    DAO.founders[DAO.currentFounderId] = recipientAddress
+                    if arsenal == nil {
+                        DAO.unclaimedFounders[recipientAddress] <-! founder
+                    } else {
+                        arsenal!.depositFounder(founder: <-founder)
+                        emit FounderDeposited(recipient: recipientAddress, founderId: DAO.currentFounderId, path: DAO.ArsenalPublicPath.toString())
+                    }
                     // increment the loop index
                     i = i + 1
                 }
+        
+        emit Closed(topicId: 0)
             }
             
             emit VoteCounted(topicId: self.topicId)
@@ -449,10 +475,11 @@ contract DAO {
             let vaultRef = DAO.account.storage.borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>(from: /storage/flowTokenVault)
                 ?? panic("Missing FlowToken vault in contract account")
             let feesVault <- vaultRef.withdraw(amount: estimate.flowFee ?? 0.0) as! @FlowToken.Vault   
+            let handlerStoragePath = StoragePath(identifier: "\(DAO.account.address)/DAO_Handler")!
 
             // Issue a capability to the handler stored in this contract account
             let handlerCap = DAO.account.capabilities.storage
-                .issue<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>(/storage/PinPin)
+                .issue<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>(handlerStoragePath)
 
             let receipt: @FlowTransactionScheduler.ScheduledTransaction <- FlowTransactionScheduler.schedule(
                 handlerCap: handlerCap,
@@ -465,9 +492,34 @@ contract DAO {
 
             log("Loop transaction id: ".concat(receipt.id.toString()).concat(" at ").concat(receipt.timestamp.toString()))
             // Save the receipt to the contract account storage
-            let receiptIdentifier = "\(DAO.account.address)/Receipts/\(receipt.id)"
+            let receiptIdentifier = "\(DAO.account.address)/DAO_Receipts/\(receipt.id)"
             let receiptStoragePath = StoragePath(identifier: receiptIdentifier)!
             DAO.account.storage.save(<-receipt, to: receiptStoragePath)
+        }
+    }
+    // Topic Struct to store topic information
+    access(all) struct TopicInfo {
+        access(all) var title: String
+        access(all) var description: String
+        access(all) var proposer: Address
+        access(all) var allowAnyoneAddOptions: Bool
+        access(all) var isFoundersTopic: Bool
+        access(all) var stringOptions: [String]
+        access(all) var addressOptions: [Address]
+        access(all) var votes: {UInt64: [Address]}
+        access(all) var closed: Bool
+        access(all) var voters: {Address: Bool}
+        init(title: String, description: String, proposer: Address, allowAnyoneAddOptions: Bool, isFoundersTopic: Bool, stringOptions: [String], addressOptions: [Address], votes: {UInt64: [Address]}, closed: Bool, voters: {Address: Bool}) {
+            self.title = title
+            self.description = description
+            self.proposer = proposer
+            self.allowAnyoneAddOptions = allowAnyoneAddOptions
+            self.isFoundersTopic = isFoundersTopic
+            self.stringOptions = stringOptions
+            self.addressOptions = addressOptions
+            self.votes = votes
+            self.closed = closed
+            self.voters = voters
         }
     }
 
@@ -484,11 +536,43 @@ contract DAO {
     access(all) view fun getUnclaimedFounders():[Address] {
         return DAO.unclaimedFounders.keys
     }
+    // Public function to get the latest topics
+    access(all) fun getLatestTopics(): [TopicInfo] {
+        // loop through to the latest topics based on the amount of Founder
+        // if 5 founders, then get the latest 5 topics
+        // then get the topic info for each topic
+        // and return the topic info
+        var topicInfos: [TopicInfo] = []
+        
+        // Get the number of founders to determine how many topics to retrieve
+        let founderCount = UInt64(DAO.founders.length)
+        let topicCount = founderCount
+        
+        // Calculate the starting topic ID (ensure we don't go below 0)
+        // If we want the latest N topics and currentTopicId = M, we want topics from max(0, M-N+1) to M
+        var startTopicId: UInt64 = 0
+        if DAO.currentTopicId >= topicCount {
+            startTopicId = DAO.currentTopicId - topicCount + 1
+        }
+        
+        // Loop through topics from startTopicId to currentTopicId (inclusive)
+        var i: UInt64 = startTopicId
+        while i <= DAO.currentTopicId {
+            let identifier = "\(DAO.account.address)/DAO_Topics/\(i)"
+            let storagePath = StoragePath(identifier: identifier)!
+            if let topic = DAO.account.storage.borrow<&Topic>(from: storagePath) {
+                topicInfos.append(topic.getTopicInfo())
+            }
+            i = i + 1
+        }
+        
+        return topicInfos
+    }
 
     // Public function to close a FounderTopic and distribute Founder resources
     // The founders topic ID is always 0
-    access(all) fun closeFounderTopic() {
-        let identifier = "\(DAO.account.address)/Topics/\(0)"
+     access(all) fun closeFounderTopic() {
+        let identifier = "\(DAO.account.address)/DAO_Topics/\(0)"
         let storagePath = StoragePath(identifier: identifier)!
         let topic = DAO.account.storage.borrow<&Topic>(from: storagePath)
             ?? panic("Founders topic not found")
@@ -527,7 +611,7 @@ contract DAO {
         }
         
         emit Closed(topicId: 0)
-    }
+    } 
 
     // Public function to create an Arsenal
     access(all) fun createArsenal(parentAccount: &Account): @Arsenal {
@@ -571,10 +655,10 @@ contract DAO {
         self.unclaimedFounders <- {}
         self.voters = {}
         self.founders = {}
-        self.ArsenalStoragePath = StoragePath(identifier: "\(DAO.account.address)/Arsenal")!
-        self.ArsenalPublicPath = PublicPath(identifier: "\(DAO.account.address)/Arsenal")!
+        self.ArsenalStoragePath = StoragePath(identifier: "\(DAO.account.address)/DAO_Arsenal")!
+        self.ArsenalPublicPath = PublicPath(identifier: "\(DAO.account.address)/DAO_Arsenal")!
         // Create the Founders topic
-        let identifier = "\(DAO.account.address)/Topics/\(self.currentTopicId)"
+        let identifier = "\(DAO.account.address)/DAO_Topics/\(self.currentTopicId)"
         let storagePath = StoragePath(identifier: identifier)!
         let foundersTopic <- create Topic(title: "", description: "", proposer: DAO.account.address, allowAnyoneAddOptions: true)
         foundersTopic.initFoundersTopic()
@@ -584,7 +668,7 @@ contract DAO {
         let delay: UFix64 = 3.0 * 60.0
         let future = getCurrentBlock().timestamp + delay
         let priority = FlowTransactionScheduler.Priority.Medium
-        let executionEffort: UInt64 = 2000
+        let executionEffort: UInt64 = 1000
         
         let estimate = FlowTransactionScheduler.estimate(
             data: self.foundersTopicId,
@@ -604,10 +688,10 @@ contract DAO {
         let fees <- vaultRef.withdraw(amount: estimate.flowFee ?? 0.0) as! @FlowToken.Vault
         
         // Create and save handler if not exists
-        let handlerIdentifier = "\(DAO.account.address)/DAOHandler"
+        let handlerIdentifier = "\(DAO.account.address)/DAO_Handler"
         let handlerStoragePath = StoragePath(identifier: handlerIdentifier)!
         if DAO.account.storage.borrow<&Handler>(from: handlerStoragePath) == nil {
-            let handler <- create Handler(topicId: self.currentTopicId)
+            let handler <- create Handler(topicId: self.currentTopicId -1)
             DAO.account.storage.save(<-handler, to: handlerStoragePath)
         }
         
@@ -617,7 +701,7 @@ contract DAO {
         
         let receipt <- FlowTransactionScheduler.schedule(
             handlerCap: handlerCap,
-            data: self.foundersTopicId,
+            data: "",
             timestamp: future,
             priority: priority,
             executionEffort: executionEffort,
@@ -625,7 +709,7 @@ contract DAO {
         )
         
         // Store receipt
-        let receiptIdentifier = "\(DAO.account.address)/Receipts/\(receipt.id)"
+        let receiptIdentifier = "\(DAO.account.address)/DAO_Receipts/\(receipt.id)"
         let receiptStoragePath = StoragePath(identifier: receiptIdentifier)!
         DAO.account.storage.save(<-receipt, to: receiptStoragePath)
     }

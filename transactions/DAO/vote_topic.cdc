@@ -1,6 +1,7 @@
 import "DAO" 
  
-transaction(firstOption: Address, secondOption: Address, thirdOption: Address) {
+transaction(topicId: UInt64, option: UInt64) {
+ 
     let arsenalRef: auth(DAO.ArsenalActions) &DAO.Arsenal
   
 
@@ -26,8 +27,7 @@ transaction(firstOption: Address, secondOption: Address, thirdOption: Address) {
     }
 
     execute {
-        let options = [firstOption, secondOption, thirdOption]
-        self.arsenalRef.voteFounder(options: options)
+        self.arsenalRef.voteTopic(topicId: topicId, option: option)
         
     }
 }
