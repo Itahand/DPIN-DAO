@@ -16,8 +16,8 @@
 			"source": "contracts/DAO.cdc",
 			"aliases": {
 				"emulator": "f8d6e0586b0a20c7",
-				"testnet": "ded84803994b06e4",
-				"testing": "0000000000000007"
+				"testing": "0000000000000007",
+				"testnet": "ded84803994b06e4"
 			}
 		}
 	},
@@ -164,6 +164,13 @@
 		"testnet": "access.devnet.nodes.onflow.org:9000"
 	},
 	"accounts": {
+		"mainnet-dpin-dao": {
+			"address": "4414755a2180da53",
+			"key": {
+				"type": "file",
+				"location": "dpin-dao.pkey"
+			}
+		},
 		"emulator-account": {
 			"address": "f8d6e0586b0a20c7",
 			"key": {
@@ -227,6 +234,11 @@
 			],
 			"testnet-dpin-dao": [],
 			"testnet-tito": []
+		},
+		"mainnet": {
+			"mainnet-dpin-dao": [
+				"DAO"
+			]
 		}
 	}
 }

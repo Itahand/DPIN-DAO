@@ -1,8 +1,9 @@
 "use client";
 
 import { useFlowCurrentUser, useFlowMutate } from "@onflow/react-sdk";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import * as fcl from "@onflow/fcl";
+import { humanizeDaoTxError } from "../../lib/flow-error-messages";
 
 interface TopicInfo {
   title: string;
@@ -20,31 +21,221 @@ interface TopicInfo {
 interface TopicVotingProps {
   topicId: number;
   topic: TopicInfo;
+  onVoteSuccess?: () => void;
 }
 
-export function TopicVoting({ topicId, topic }: TopicVotingProps) {
+export function TopicVoting({ topicId, topic, onVoteSuccess }: TopicVotingProps) {
   const { user } = useFlowCurrentUser();
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [newOption, setNewOption] = useState("");
 
-  const { mutate: voteMutate, isPending: isVotingPending } = useFlowMutate();
-  const { mutate: addOptionMutate, isPending: isAddingOptionPending } = useFlowMutate();
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [pendingVoteTxId, setPendingVoteTxId] = useState<string | null>(null);
+  const [pendingAddOptionTxId, setPendingAddOptionTxId] = useState<string | null>(null);
+  const [processingMessage, setProcessingMessage] = useState<string | null>(null);
+
+  const { mutate: voteMutate, isPending: isVotingPending, data: voteTxId } = useFlowMutate({
+    mutation: {
+      onSuccess: (transactionId) => {
+        console.log("Vote transaction submitted! Transaction ID:", transactionId);
+        setPendingVoteTxId(transactionId);
+        setError(null);
+        // Don't clear forms or show success yet - wait for sealing
+      },
+      onError: (error) => {
+        console.error("Vote failed:", error);
+        setPendingVoteTxId(null);
+        let errorMessage = error instanceof Error ? error.message : String(error);
+
+        setError(humanizeDaoTxError(errorMessage));
+        setSuccess(null);
+        setTimeout(() => setError(null), 15000);
+      },
+    },
+  });
+  
+  const { mutate: addOptionMutate, isPending: isAddingOptionPending, data: addOptionTxId } = useFlowMutate({
+    mutation: {
+      onSuccess: (transactionId) => {
+        console.log("Add option transaction submitted! Transaction ID:", transactionId);
+        setPendingAddOptionTxId(transactionId);
+        setError(null);
+        // Don't clear forms or show success yet - wait for sealing
+      },
+      onError: (error) => {
+        console.error("Add option failed:", error);
+        setPendingAddOptionTxId(null);
+        let errorMessage = error instanceof Error ? error.message : String(error);
+
+        setError(humanizeDaoTxError(errorMessage));
+        setSuccess(null);
+        setTimeout(() => setError(null), 15000);
+      },
+    },
+  });
+
+  // Wait for vote transaction to be sealed and show real failure reason
+  useEffect(() => {
+    if (!pendingVoteTxId) {
+      return;
+    }
+
+    let unsub: (() => void) | undefined;
+    let cancelled = false;
+
+    try {
+      unsub = fcl.tx(pendingVoteTxId).subscribe((s: any) => {
+        if (cancelled) return;
+        const status: number | undefined = s?.status;
+        const statusMessages: Record<number, string> = {
+          1: "Vote transaction pending...",
+          2: "Vote transaction finalized...",
+          3: "Vote transaction executed, waiting for seal...",
+          4: "Vote transaction sealed. Verifying...",
+        };
+        if (typeof status === "number") {
+          setProcessingMessage(statusMessages[status] || "Processing vote...");
+        }
+      });
+    } catch (e) {
+      console.error("Failed to subscribe to vote tx status:", e);
+      setProcessingMessage("Processing vote...");
+    }
+
+    (async () => {
+      try {
+        const sealed: any = await fcl.tx(pendingVoteTxId).onceSealed();
+        if (cancelled) return;
+
+        const statusCode: number | undefined = sealed?.statusCode;
+        const errorMessage: string | undefined = sealed?.errorMessage;
+
+        if (statusCode && statusCode !== 0) {
+          setError(humanizeDaoTxError(errorMessage || "Vote transaction failed (sealed)."));
+          setSuccess(null);
+          setProcessingMessage(null);
+          setPendingVoteTxId(null);
+          return;
+        }
+
+        setSuccess("Vote submitted successfully!");
+        setError(null);
+        setProcessingMessage(null);
+        setSelectedOption(null);
+        setPendingVoteTxId(null);
+        if (onVoteSuccess) onVoteSuccess();
+        setTimeout(() => setSuccess(null), 5000);
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(humanizeDaoTxError(msg));
+        setSuccess(null);
+        setProcessingMessage(null);
+        setPendingVoteTxId(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      try {
+        unsub?.();
+      } catch {
+        // ignore
+      }
+    };
+  }, [pendingVoteTxId, onVoteSuccess]);
+
+  // Wait for add option transaction to be sealed and show real failure reason
+  useEffect(() => {
+    if (!pendingAddOptionTxId) {
+      return;
+    }
+
+    let unsub: (() => void) | undefined;
+    let cancelled = false;
+
+    try {
+      unsub = fcl.tx(pendingAddOptionTxId).subscribe((s: any) => {
+        if (cancelled) return;
+        const status: number | undefined = s?.status;
+        const statusMessages: Record<number, string> = {
+          1: "Add option pending...",
+          2: "Add option finalized...",
+          3: "Add option executed, waiting for seal...",
+          4: "Add option sealed. Verifying...",
+        };
+        if (typeof status === "number") {
+          setProcessingMessage(statusMessages[status] || "Processing add option...");
+        }
+      });
+    } catch (e) {
+      console.error("Failed to subscribe to add option tx status:", e);
+      setProcessingMessage("Processing add option...");
+    }
+
+    (async () => {
+      try {
+        const sealed: any = await fcl.tx(pendingAddOptionTxId).onceSealed();
+        if (cancelled) return;
+
+        const statusCode: number | undefined = sealed?.statusCode;
+        const errorMessage: string | undefined = sealed?.errorMessage;
+
+        if (statusCode && statusCode !== 0) {
+          setError(humanizeDaoTxError(errorMessage || "Add option transaction failed (sealed)."));
+          setSuccess(null);
+          setProcessingMessage(null);
+          setPendingAddOptionTxId(null);
+          return;
+        }
+
+        setSuccess("Option added successfully!");
+        setError(null);
+        setProcessingMessage(null);
+        setNewOption("");
+        setPendingAddOptionTxId(null);
+        if (onVoteSuccess) onVoteSuccess();
+        setTimeout(() => setSuccess(null), 5000);
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(humanizeDaoTxError(msg));
+        setSuccess(null);
+        setProcessingMessage(null);
+        setPendingAddOptionTxId(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      try {
+        unsub?.();
+      } catch {
+        // ignore
+      }
+    };
+  }, [pendingAddOptionTxId, onVoteSuccess]);
 
   const handleVote = async () => {
+    setError(null);
+    setSuccess(null);
+    setProcessingMessage(null);
+
     if (selectedOption === null) {
-      alert("Please select an option");
+      setError("Please select an option");
       return;
     }
 
     if (!user?.loggedIn) {
-      alert("Please connect your wallet first");
+      setError("Please connect your wallet first");
       return;
     }
 
     try {
       voteMutate({
         cadence: `
-          import DAO from 0xded84803994b06e4
+          import DAO from 0x4414755a2180da53
           
           transaction(topicId: UInt64, option: UInt64) {
             let arsenalRef: auth(DAO.ArsenalActions) &DAO.Arsenal
@@ -77,28 +268,33 @@ export function TopicVoting({ topicId, topic }: TopicVotingProps) {
         authorizations: [fcl.currentUser],
         limit: 1000,
       });
-      setSelectedOption(null);
+      // Don't clear fields here - only clear on success (in onSuccess callback)
     } catch (error) {
       console.error("Vote failed:", error);
-      alert("Failed to vote. You may have already voted.");
+      // Error is handled by the mutation's onError callback
+      // Fields are NOT cleared on error - user can retry
     }
   };
 
   const handleAddOption = async () => {
+    setError(null);
+    setSuccess(null);
+    setProcessingMessage(null);
+
     if (!newOption.trim()) {
-      alert("Please enter an option");
+      setError("Please enter an option");
       return;
     }
 
     if (!topic.allowAnyoneAddOptions) {
-      alert("This topic does not allow adding options");
+      setError("This topic does not allow adding options");
       return;
     }
 
     try {
       addOptionMutate({
         cadence: `
-          import DAO from 0xded84803994b06e4
+          import DAO from 0x4414755a2180da53
           
           transaction(topicId: UInt64, option: String) {
             let arsenalRef: auth(DAO.ArsenalActions) &DAO.Arsenal
@@ -131,9 +327,11 @@ export function TopicVoting({ topicId, topic }: TopicVotingProps) {
         authorizations: [fcl.currentUser],
         limit: 1000,
       });
-      setNewOption("");
+      // Don't clear fields here - only clear on success (in onSuccess callback)
     } catch (error) {
       console.error("Add option failed:", error);
+      // Error is handled by the mutation's onError callback
+      // Fields are NOT cleared on error - user can retry
     }
   };
 
@@ -151,6 +349,32 @@ export function TopicVoting({ topicId, topic }: TopicVotingProps) {
 
   return (
     <div className="mt-4 pt-4 border-t border-black/10 dark:border-white/10">
+      {(error || success || processingMessage) && (
+        <div className="mb-4">
+          {error && (
+            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+              <p className="text-sm text-red-500 dark:text-red-400">
+                {error}
+              </p>
+            </div>
+          )}
+          {processingMessage && (
+            <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+              <p className="text-sm text-blue-500 dark:text-blue-400">
+                {processingMessage}
+              </p>
+            </div>
+          )}
+          {success && (
+            <div className="p-3 rounded-lg bg-[#00ef8b]/10 border border-[#00ef8b]/20">
+              <p className="text-sm text-[#00ef8b] dark:text-[#00d97a]">
+                {success}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {hasVoted ? (
         <p className="text-sm text-[#00ef8b] font-semibold">
           ✓ You have already voted on this topic
@@ -182,10 +406,10 @@ export function TopicVoting({ topicId, topic }: TopicVotingProps) {
           </div>
           <button
             onClick={handleVote}
-            disabled={isVotingPending || selectedOption === null}
+            disabled={isVotingPending || selectedOption === null || pendingVoteTxId !== null}
             className="w-full px-6 py-3 rounded-lg bg-[#00ef8b] text-black font-semibold hover:bg-[#00d97a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isVotingPending ? "Voting..." : "Submit Vote"}
+            {isVotingPending ? "Submitting..." : pendingVoteTxId ? "Waiting for confirmation..." : "Submit Vote"}
           </button>
         </>
       )}
@@ -205,10 +429,10 @@ export function TopicVoting({ topicId, topic }: TopicVotingProps) {
             />
             <button
               onClick={handleAddOption}
-              disabled={isAddingOptionPending || !newOption.trim()}
+              disabled={isAddingOptionPending || !newOption.trim() || pendingAddOptionTxId !== null}
               className="px-4 py-2 rounded-lg bg-black/10 dark:bg-white/10 text-black dark:text-white font-semibold hover:bg-black/20 dark:hover:bg-white/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isAddingOptionPending ? "Adding..." : "Add"}
+              {isAddingOptionPending ? "Submitting..." : pendingAddOptionTxId ? "Waiting..." : "Add"}
             </button>
           </div>
         </div>
@@ -216,3 +440,4 @@ export function TopicVoting({ topicId, topic }: TopicVotingProps) {
     </div>
   );
 }
+

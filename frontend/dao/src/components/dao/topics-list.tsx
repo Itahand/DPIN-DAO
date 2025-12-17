@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { useFlowQuery } from "@onflow/react-sdk";
 import { TopicVoting } from "./topic-voting";
 
@@ -16,27 +17,14 @@ interface TopicInfo {
   voters: { [key: string]: boolean };
 }
 
-export function TopicsList() {
-  // Always fetch the Founders topic (topic ID 0) separately
-  const { data: foundersTopic, isLoading: foundersTopicLoading } = useFlowQuery({
-    cadence: `
-      import DAO from 0xded84803994b06e4
-      
-      access(all) fun main(): DAO.TopicInfo? {
-        let identifier = "0xded84803994b06e4/DAO_Topics/0"
-        let storagePath = StoragePath(identifier: identifier)!
-        if let topic = getAccount(0xded84803994b06e4).storage.borrow<&DAO.Topic>(from: storagePath) {
-          return topic.getTopicInfo()
-        }
-        return nil
-      }
-    `,
-    args: (arg, t) => [],
-  });
+interface TopicsListProps {
+  refetchRef?: React.MutableRefObject<(() => void) | null>;
+}
 
-  const { data: topics, isLoading, error } = useFlowQuery({
+export function TopicsList({ refetchRef }: TopicsListProps) {
+  const { data: topics, isLoading, error, refetch } = useFlowQuery({
     cadence: `
-      import DAO from 0xded84803994b06e4
+      import DAO from 0x4414755a2180da53
       
       access(all) fun main(): [DAO.TopicInfo] {
         log("Fetching latest topics from DAO contract")
@@ -48,20 +36,25 @@ export function TopicsList() {
     args: (arg, t) => [],
   });
 
+  // Expose refetch function to parent
+  useEffect(() => {
+    if (refetchRef) {
+      refetchRef.current = refetch;
+    }
+  }, [refetch, refetchRef]);
+
   console.log("TopicsList - isLoading:", isLoading);
   console.log("TopicsList - error:", error);
   console.log("TopicsList - data:", topics);
   console.log("TopicsList - topics type:", typeof topics);
   console.log("TopicsList - topics is array:", Array.isArray(topics));
-  console.log("TopicsList - foundersTopic:", foundersTopic);
-  console.log("TopicsList - foundersTopicLoading:", foundersTopicLoading);
 
   if (error) {
     console.error("Error loading topics:", error);
     console.error("Error details:", JSON.stringify(error, null, 2));
   }
 
-  if (isLoading || foundersTopicLoading) {
+  if (isLoading) {
     return (
       <div className="rounded-2xl sm:rounded-3xl bg-[rgb(241,245,249)] dark:bg-white/[0.04] p-6 sm:p-8">
         <p className="text-black/60 dark:text-white/60">Loading topics...</p>
@@ -79,7 +72,7 @@ export function TopicsList() {
           Error loading topics: {error instanceof Error ? error.message : String(error)}
         </p>
         <p className="text-xs text-black/40 dark:text-white/40 mt-2">
-          Make sure the DAO contract is deployed at 0xded84803994b06e4 on testnet
+          Make sure the DAO contract is deployed at 0x4414755a2180da53 on mainnet
         </p>
       </div>
     );
@@ -87,28 +80,8 @@ export function TopicsList() {
 
   const topicsArray = Array.isArray(topics) ? topics as TopicInfo[] : [];
   
-  // Combine founders topic with other topics, ensuring founders topic is first
-  const allTopics: TopicInfo[] = [];
-  
-  // Add founders topic first if it exists
-  if (foundersTopic) {
-    allTopics.push(foundersTopic as TopicInfo);
-  }
-  
-  // Add other topics, excluding the founders topic if it's already in the list
-  topicsArray.forEach(topic => {
-    if (!topic.isFoundersTopic) {
-      allTopics.push(topic);
-    } else if (!foundersTopic) {
-      // If founders topic wasn't fetched separately but is in the list, add it
-      allTopics.push(topic);
-    }
-  });
-  
   console.log("TopicsList - topicsArray length:", topicsArray.length);
   console.log("TopicsList - topicsArray:", topicsArray);
-  console.log("TopicsList - allTopics length:", allTopics.length);
-  console.log("TopicsList - allTopics:", allTopics);
 
   // Calculate topic IDs: topics are returned sequentially from startTopicId to currentTopicId
   // Topic 0 is always the founders topic
@@ -130,9 +103,9 @@ export function TopicsList() {
     return topics.map((_, i) => firstTopicId + i);
   };
 
-  const topicIds = calculateTopicIds(allTopics);
+  const topicIds = calculateTopicIds(topicsArray);
 
-  if (allTopics.length === 0) {
+  if (topicsArray.length === 0) {
     return (
       <div className="rounded-2xl sm:rounded-3xl bg-[rgb(241,245,249)] dark:bg-white/[0.04] p-6 sm:p-8">
         <h3 className="text-xl font-semibold text-black dark:text-white mb-4">
@@ -150,7 +123,7 @@ export function TopicsList() {
       <h2 className="text-2xl sm:text-3xl font-semibold text-black dark:text-white">
         Topics
       </h2>
-      {allTopics.map((topic, index) => {
+      {topicsArray.map((topic, index) => {
         const topicId = topicIds[index];
         return (
         <div
@@ -246,7 +219,7 @@ export function TopicsList() {
               </div>
 
               {!topic.closed && (
-                <TopicVoting topicId={topicId} topic={topic} />
+                <TopicVoting topicId={topicId} topic={topic} onVoteSuccess={refetch} />
               )}
             </>
           )}
@@ -256,3 +229,4 @@ export function TopicsList() {
     </div>
   );
 }
+

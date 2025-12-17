@@ -1,18 +1,23 @@
 "use client";
 
 import { useFlowCurrentUser, useFlowMutate, useFlowQuery } from "@onflow/react-sdk";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import * as fcl from "@onflow/fcl";
+import { humanizeDaoTxError } from "../../lib/flow-error-messages";
 
 export function FoundersVoting() {
   const { user } = useFlowCurrentUser();
   const [firstOption, setFirstOption] = useState("");
   const [secondOption, setSecondOption] = useState("");
   const [thirdOption, setThirdOption] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [pendingTxId, setPendingTxId] = useState<string | null>(null);
+  const [processingMessage, setProcessingMessage] = useState<string | null>(null);
 
-  const { data: founderVotes, isLoading: votesLoading, error: votesError } = useFlowQuery({
+  const { data: founderVotes, isLoading: votesLoading, error: votesError, refetch: refetchVotes } = useFlowQuery({
     cadence: `
-      import DAO from 0xded84803994b06e4
+      import DAO from 0x4414755a2180da53
       
       access(all) fun main(): {Address: UInt64} {
         log("Fetching founder votes from DAO contract")
@@ -30,23 +35,123 @@ export function FoundersVoting() {
   console.log("FoundersVoting - founderVotes keys:", founderVotes ? Object.keys(founderVotes) : []);
   console.log("FoundersVoting - founderVotes length:", founderVotes ? Object.keys(founderVotes).length : 0);
 
-  const { mutate, isPending } = useFlowMutate();
+  const { mutate, isPending, error: mutateError, data: txId } = useFlowMutate({
+    mutation: {
+      onSuccess: (transactionId) => {
+        console.log("Transaction submitted! Transaction ID:", transactionId);
+        setPendingTxId(transactionId);
+        setError(null);
+        // Don't clear forms or show success yet - wait for sealing
+      },
+      onError: (error) => {
+        console.error("Vote failed:", error);
+        setPendingTxId(null);
+        let errorMessage = error instanceof Error ? error.message : String(error);
+
+        setError(humanizeDaoTxError(errorMessage));
+        setSuccess(null);
+        // Clear error message after 15 seconds
+        setTimeout(() => setError(null), 15000);
+      },
+    },
+  });
+
+  // Wait for transaction to be sealed and show real failure reason (sealed errorMessage)
+  useEffect(() => {
+    if (!pendingTxId) {
+      setProcessingMessage(null);
+      return;
+    }
+
+    let unsub: (() => void) | undefined;
+    let cancelled = false;
+
+    // Live status updates while we wait (pending/finalized/executed)
+    try {
+      unsub = fcl.tx(pendingTxId).subscribe((s: any) => {
+        if (cancelled) return;
+        const status: number | undefined = s?.status;
+        const statusMessages: Record<number, string> = {
+          1: "Transaction pending...",
+          2: "Transaction finalized...",
+          3: "Transaction executed, waiting for seal...",
+          4: "Transaction sealed. Verifying...",
+        };
+        if (typeof status === "number") {
+          setProcessingMessage(statusMessages[status] || "Processing transaction...");
+        }
+      });
+    } catch (e) {
+      console.error("Failed to subscribe to tx status:", e);
+      setProcessingMessage("Processing transaction...");
+    }
+
+    (async () => {
+      try {
+        const sealed: any = await fcl.tx(pendingTxId).onceSealed();
+        if (cancelled) return;
+
+        // FCL sealed response includes statusCode + errorMessage
+        const statusCode: number | undefined = sealed?.statusCode;
+        const errorMessage: string | undefined = sealed?.errorMessage;
+
+        if (statusCode && statusCode !== 0) {
+          setError(humanizeDaoTxError(errorMessage || "Transaction failed (sealed)."));
+          setSuccess(null);
+          setProcessingMessage(null);
+          setPendingTxId(null);
+          return;
+        }
+
+        // Success (sealed)
+        setSuccess("Vote submitted successfully! Transaction ID: " + pendingTxId);
+        setError(null);
+        setProcessingMessage(null);
+        setFirstOption("");
+        setSecondOption("");
+        setThirdOption("");
+        setPendingTxId(null);
+        refetchVotes();
+        setTimeout(() => setSuccess(null), 5000);
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(humanizeDaoTxError(msg));
+        setSuccess(null);
+        setProcessingMessage(null);
+        setPendingTxId(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      try {
+        unsub?.();
+      } catch {
+        // ignore
+      }
+    };
+  }, [pendingTxId, refetchVotes]);
 
   const handleVote = async () => {
+    setError(null);
+    setSuccess(null);
+    setProcessingMessage(null);
+
     if (!firstOption || !secondOption || !thirdOption) {
-      alert("Please provide all three addresses");
+      setError("Please provide all three addresses");
       return;
     }
 
     if (!user?.loggedIn) {
-      alert("Please connect your wallet first");
+      setError("Please connect your wallet first");
       return;
     }
 
     try {
       mutate({
         cadence: `
-          import DAO from 0xded84803994b06e4
+          import DAO from 0x4414755a2180da53
           
           transaction(firstOption: Address, secondOption: Address, thirdOption: Address) {
             let arsenalRef: auth(DAO.ArsenalActions) &DAO.Arsenal
@@ -81,11 +186,10 @@ export function FoundersVoting() {
         authorizations: [fcl.currentUser],
         limit: 1000,
       });
-      setFirstOption("");
-      setSecondOption("");
-      setThirdOption("");
     } catch (error) {
       console.error("Vote failed:", error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setError(humanizeDaoTxError(errorMessage));
     }
   };
 
@@ -173,12 +277,39 @@ export function FoundersVoting() {
         </div>
       </div>
 
+      {(error || mutateError) && (
+        <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+          <p className="text-sm text-red-500 dark:text-red-400">
+            {error ||
+              humanizeDaoTxError(
+                mutateError instanceof Error ? mutateError.message : String(mutateError)
+              )}
+          </p>
+        </div>
+      )}
+
+      {processingMessage && (
+        <div className="mb-4 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+          <p className="text-sm text-blue-500 dark:text-blue-400">
+            {processingMessage}
+          </p>
+        </div>
+      )}
+
+      {success && (
+        <div className="mb-4 p-3 rounded-lg bg-[#00ef8b]/10 border border-[#00ef8b]/20">
+          <p className="text-sm text-[#00ef8b] dark:text-[#00d97a]">
+            {success}
+          </p>
+        </div>
+      )}
+
       <button
         onClick={handleVote}
-        disabled={isPending}
+        disabled={isPending || pendingTxId !== null}
         className="w-full px-6 py-3 rounded-lg bg-[#00ef8b] text-black font-semibold hover:bg-[#00d97a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {isPending ? "Voting..." : "Submit Vote"}
+        {isPending ? "Submitting..." : pendingTxId ? "Waiting for confirmation..." : "Submit Vote"}
       </button>
 
       {!votesLoading && founderVotes && Object.keys(founderVotes).length > 0 && (
@@ -220,3 +351,4 @@ export function FoundersVoting() {
     </div>
   );
 }
+

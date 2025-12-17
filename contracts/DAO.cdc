@@ -3,8 +3,8 @@
 import "FlowTransactionScheduler" 
 import "FungibleToken"
 import "FlowToken"
-// import "HybridCustody"
-// import "Pinnacle"
+import "HybridCustody"
+import "Pinnacle"
 
 access(all)
 contract DAO {
@@ -689,12 +689,12 @@ contract DAO {
     } 
 
     // Public function to create an Arsenal
-    access(all) fun createArsenal(parentAccount: &Account): @Arsenal {
-        let newArsenal <- create Arsenal(pinnacleAccount: parentAccount.address)
-        return <- newArsenal
+    access(all) fun createArsenal(parentAccount: &Account): @Arsenal? {
+/*         let newArsenal <- create Arsenal(pinnacleAccount: parentAccount.address)
+        return <- newArsenal */
         // We need to verify that the parent account is a manager
         // of a Pinnacle Collection owner child account
-/*      let manager = parentAccount.capabilities.borrow<&HybridCustody.Manager>(HybridCustody.ManagerPublicPath)
+     let manager = parentAccount.capabilities.borrow<&HybridCustody.Manager>(HybridCustody.ManagerPublicPath)
         ?? panic("manager not found")
         // Get children of the parent account
         var children = manager.getChildAddresses()
@@ -719,7 +719,7 @@ contract DAO {
             }
             panic("No Pinnacle Collection owner child account found with more than 9 NFTs")
         } 
-            return nil */
+            return nil
     }
 
     init() {
@@ -738,8 +738,6 @@ contract DAO {
         let foundersTopic <- create Topic(title: "", description: "", proposer: DAO.account.address, allowAnyoneAddOptions: true)
         foundersTopic.initFoundersTopic()
         DAO.account.storage.save(<-foundersTopic, to: storagePath)
-        
-
 
     }
 }

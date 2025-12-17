@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { WalletConnect } from "./tutorial/wallet-connect";
 import { FoundersVoting } from "./dao/founders-voting";
 import { FoundersList } from "./dao/founders-list";
@@ -7,6 +8,14 @@ import { TopicsList } from "./dao/topics-list";
 import { CreateTopic } from "./dao/create-topic";
 
 export function FlowContent() {
+  const topicsRefetchRef = useRef<(() => void) | null>(null);
+
+  const refreshTopics = () => {
+    if (topicsRefetchRef.current) {
+      topicsRefetchRef.current();
+    }
+  };
+
   return (
     <main className="container mx-auto px-4 sm:px-6 lg:px-8 relative">
       <div className="flex flex-col items-center justify-center py-8 sm:py-12 lg:py-16">
@@ -28,9 +37,9 @@ export function FlowContent() {
               <FoundersList />
             </div>
 
-            <CreateTopic />
+            <CreateTopic onTopicCreated={refreshTopics} />
 
-            <TopicsList />
+            <TopicsList refetchRef={topicsRefetchRef} />
           </div>
         </div>
       </div>

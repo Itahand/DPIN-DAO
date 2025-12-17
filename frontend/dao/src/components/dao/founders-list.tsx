@@ -5,7 +5,7 @@ import { useFlowQuery } from "@onflow/react-sdk";
 export function FoundersList() {
   const { data: founders, isLoading, error: foundersError } = useFlowQuery({
     cadence: `
-      import DAO from 0xded84803994b06e4
+      import DAO from 0x4414755a2180da53
       
       access(all) fun main(): {UInt64: Address} {
         log("Fetching all founders from DAO contract")
@@ -19,7 +19,7 @@ export function FoundersList() {
 
   const { data: unclaimedFounders, error: unclaimedError } = useFlowQuery({
     cadence: `
-      import DAO from 0xded84803994b06e4
+      import DAO from 0x4414755a2180da53
       
       access(all) fun main(): [Address] {
         log("Fetching unclaimed founders from DAO contract")
@@ -111,3 +111,4 @@ export function FoundersList() {
     </div>
   );
 }
+

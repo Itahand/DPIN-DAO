@@ -1,19 +1,28 @@
 "use client";
 
 import { useFlowCurrentUser, useFlowMutate, useFlowQuery } from "@onflow/react-sdk";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import * as fcl from "@onflow/fcl";
+import { humanizeDaoTxError } from "../../lib/flow-error-messages";
 
-export function CreateTopic() {
+interface CreateTopicProps {
+  onTopicCreated?: () => void;
+}
+
+export function CreateTopic({ onTopicCreated }: CreateTopicProps) {
   const { user } = useFlowCurrentUser();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [options, setOptions] = useState<string[]>(["", ""]);
   const [allowAnyoneAddOptions, setAllowAnyoneAddOptions] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [pendingTxId, setPendingTxId] = useState<string | null>(null);
+  const [processingMessage, setProcessingMessage] = useState<string | null>(null);
 
   const { data: founders, isLoading: foundersLoading, error: foundersError } = useFlowQuery({
     cadence: `
-      import DAO from 0xded84803994b06e4
+      import DAO from 0x4414755a2180da53
       
       access(all) fun main(): {UInt64: Address} {
         log("Fetching founders for CreateTopic component")
@@ -29,7 +38,100 @@ export function CreateTopic() {
   console.log("CreateTopic - foundersError:", foundersError);
   console.log("CreateTopic - founders data:", founders);
 
-  const { mutate, isPending } = useFlowMutate();
+  const { mutate, isPending, data: txId } = useFlowMutate({
+    mutation: {
+      onSuccess: (transactionId) => {
+        console.log("Create topic transaction submitted! Transaction ID:", transactionId);
+        setPendingTxId(transactionId);
+        setError(null);
+        // Don't clear forms or show success yet - wait for sealing
+      },
+      onError: (error) => {
+        console.error("Create topic failed:", error);
+        setPendingTxId(null);
+        let errorMessage = error instanceof Error ? error.message : String(error);
+
+        setError(humanizeDaoTxError(errorMessage));
+        setSuccess(null);
+        setTimeout(() => setError(null), 15000);
+      },
+    },
+  });
+
+  // Wait for transaction to be sealed and show real failure reason (sealed errorMessage)
+  useEffect(() => {
+    if (!pendingTxId) {
+      setProcessingMessage(null);
+      return;
+    }
+
+    let unsub: (() => void) | undefined;
+    let cancelled = false;
+
+    try {
+      unsub = fcl.tx(pendingTxId).subscribe((s: any) => {
+        if (cancelled) return;
+        const status: number | undefined = s?.status;
+        const statusMessages: Record<number, string> = {
+          1: "Topic creation pending...",
+          2: "Topic creation finalized...",
+          3: "Topic creation executed, waiting for seal...",
+          4: "Topic creation sealed. Verifying...",
+        };
+        if (typeof status === "number") {
+          setProcessingMessage(statusMessages[status] || "Processing topic creation...");
+        }
+      });
+    } catch (e) {
+      console.error("Failed to subscribe to create topic tx status:", e);
+      setProcessingMessage("Processing topic creation...");
+    }
+
+    (async () => {
+      try {
+        const sealed: any = await fcl.tx(pendingTxId).onceSealed();
+        if (cancelled) return;
+
+        const statusCode: number | undefined = sealed?.statusCode;
+        const errorMessage: string | undefined = sealed?.errorMessage;
+
+        if (statusCode && statusCode !== 0) {
+          setError(humanizeDaoTxError(errorMessage || "Topic creation failed (sealed)."));
+          setSuccess(null);
+          setProcessingMessage(null);
+          setPendingTxId(null);
+          return;
+        }
+
+        setSuccess("Topic created successfully! Transaction ID: " + pendingTxId);
+        setError(null);
+        setProcessingMessage(null);
+        setTitle("");
+        setDescription("");
+        setOptions(["", ""]);
+        setAllowAnyoneAddOptions(false);
+        setPendingTxId(null);
+        if (onTopicCreated) onTopicCreated();
+        setTimeout(() => setSuccess(null), 5000);
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg);
+        setSuccess(null);
+        setProcessingMessage(null);
+        setPendingTxId(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      try {
+        unsub?.();
+      } catch {
+        // ignore
+      }
+    };
+  }, [pendingTxId, onTopicCreated]);
 
   const isFounder = user?.loggedIn && founders
     ? Object.values(founders).includes(user.addr)
@@ -52,26 +154,30 @@ export function CreateTopic() {
   };
 
   const handleSubmit = async () => {
+    setError(null);
+    setSuccess(null);
+    setProcessingMessage(null);
+
     if (!title.trim()) {
-      alert("Please enter a title");
+      setError("Please enter a title");
       return;
     }
 
     if (!description.trim()) {
-      alert("Please enter a description");
+      setError("Please enter a description");
       return;
     }
 
     const validOptions = options.filter((opt) => opt.trim());
     if (validOptions.length < 2) {
-      alert("Please provide at least 2 options");
+      setError("Please provide at least 2 options");
       return;
     }
 
     try {
       mutate({
         cadence: `
-          import DAO from 0xded84803994b06e4
+          import DAO from 0x4414755a2180da53
           
           transaction(title: String, description: String, initialOptions: [String], allowAnyoneAddOptions: Bool) {
             let founderRef: auth(DAO.FounderActions) &DAO.Arsenal
@@ -102,13 +208,10 @@ export function CreateTopic() {
         authorizations: [fcl.currentUser],
         limit: 1000,
       });
-      setTitle("");
-      setDescription("");
-      setOptions(["", ""]);
-      setAllowAnyoneAddOptions(false);
     } catch (error) {
       console.error("Create topic failed:", error);
-      alert("Failed to create topic. Make sure you are a founder.");
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setError(humanizeDaoTxError(errorMessage));
     }
   };
 
@@ -212,13 +315,38 @@ export function CreateTopic() {
         </div>
       </div>
 
+      {error && (
+        <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+          <p className="text-sm text-red-500 dark:text-red-400">
+            {error}
+          </p>
+        </div>
+      )}
+
+      {processingMessage && (
+        <div className="mb-4 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+          <p className="text-sm text-blue-500 dark:text-blue-400">
+            {processingMessage}
+          </p>
+        </div>
+      )}
+
+      {success && (
+        <div className="mb-4 p-3 rounded-lg bg-[#00ef8b]/10 border border-[#00ef8b]/20">
+          <p className="text-sm text-[#00ef8b] dark:text-[#00d97a]">
+            {success}
+          </p>
+        </div>
+      )}
+
       <button
         onClick={handleSubmit}
-        disabled={isPending}
+        disabled={isPending || pendingTxId !== null}
         className="w-full px-6 py-3 rounded-lg bg-[#00ef8b] text-black font-semibold hover:bg-[#00d97a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {isPending ? "Creating..." : "Create Topic"}
+        {isPending ? "Submitting..." : pendingTxId ? "Waiting for confirmation..." : "Create Topic"}
       </button>
     </div>
   );
 }
+
